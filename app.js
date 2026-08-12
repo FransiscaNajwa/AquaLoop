@@ -180,6 +180,12 @@ async function loadDashboard(pondCode) {
   }
 }
 
+function startAutoRefresh() {
+  setInterval(() => {
+    loadDashboard(state.activePond);
+  }, 5000);
+}
+
 navItems.forEach((item) => {
   item.addEventListener("click", () => switchTab(item.dataset.target));
 });
@@ -197,3 +203,5 @@ window.switchTab = switchTab;
 switchTab("dashboard");
 setPondButtonState(state.activePond);
 loadDashboard(state.activePond);
+startAutoRefresh();
+

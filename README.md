@@ -12,6 +12,7 @@ It is built as a Laragon-friendly web app with a MySQL backend, PHP API layer, a
 - Sustainability view for recirculation and economic summary
 - Audit trail timeline for historical events and system actions
 - MySQL-backed API so the UI can read live data from the database
+- HTTP POST ingestion from the sensor script into the PHP backend
 
 ## Tech Stack
 
@@ -39,8 +40,10 @@ aqualoop-web/
 1. The browser opens `index.html`.
 2. `app.js` requests pond data from `api/dashboard.php`.
 3. `dashboard.php` connects to MySQL through `api/db.php`.
-4. The API returns JSON for the latest reading, devices, and audit logs.
-5. The frontend renders the dashboard and switches between ponds.
+4. `sensor_reading.py` sends readings with HTTP POST to `api/ingest.php`.
+5. `ingest.php` saves pond, device, sensor, and audit data into MySQL.
+6. The API returns JSON for the latest reading, devices, and audit logs.
+7. The frontend renders the dashboard and switches between ponds.
 
 ## Setup With Laragon
 
@@ -86,6 +89,34 @@ Default values:
 - User: `root`
 - Password: empty
 
+## Sensor Ingestion Flow
+
+The recommended data path is:
+
+```text
+sensor_reading.py -> HTTP POST -> api/ingest.php -> MySQL -> api/dashboard.php -> browser
+```
+
+The Python script uses:
+
+- `POST http://localhost:8080/aqualoop-web/api/ingest.php`
+
+The backend accepts JSON like:
+
+```json
+{
+  "pond_code": "A",
+  "device_code": "POND-A-NODE-01",
+  "ph": 7.5,
+  "dissolved_oxygen": 6.8,
+  "salinity": 5,
+  "temperature": 28.5,
+  "ammonia": 0.02,
+  "battery_percent": 85,
+  "pump_power_watts": 62
+}
+```
+
 ## Run the App
 
 If Apache runs on port `8080`, open:
@@ -98,6 +129,12 @@ To test the API directly:
 
 ```text
 http://localhost:8080/aqualoop-web/api/dashboard.php
+```
+
+To test ingestion:
+
+```text
+POST http://localhost:8080/aqualoop-web/api/ingest.php
 ```
 
 ## API Response
@@ -137,6 +174,7 @@ It also includes:
 - `app.js` - tab switching, pond switching, and API fetching
 - `api/db.php` - MySQL connection helper
 - `api/dashboard.php` - dashboard JSON endpoint
+- `api/ingest.php` - sensor ingestion endpoint
 - `database/aqualoop_mysql.sql` - schema for Laragon MySQL
 
 ## Notes
@@ -144,6 +182,7 @@ It also includes:
 - The UI is designed to work even when the database is empty.
 - If no data exists yet, the dashboard shows an empty-state message.
 - This repository is focused on the web app only.
+- `api-mock.js` is no longer used by the dashboard.
 
 ## Troubleshooting
 
