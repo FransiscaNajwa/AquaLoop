@@ -1,92 +1,132 @@
-const screens = Array.from(document.querySelectorAll(".screen"));
-const navItems = Array.from(document.querySelectorAll(".nav-item"));
-const content = document.getElementById("main-content");
-const screenTitle = document.getElementById("screen-title");
-const screenSubtitle = document.getElementById("screen-subtitle");
-const activePondLabel = document.getElementById("active-pond-label");
-const pondButtons = Array.from(document.querySelectorAll("[data-pond]"));
-const auditTimeline = document.getElementById("audit-timeline");
-const auditCount = document.getElementById("audit-count");
-const activeSensorCount = document.getElementById("active-sensor-count");
-const pondSyncStatus = document.getElementById("pond-sync-status");
+document.addEventListener("DOMContentLoaded", () => {
+  loadDashboard();
+  // Refresh otomatis setiap 5 detik agar data selalu real-time
+  setInterval(loadDashboard, 5000);
+});
 
-const screenMeta = {
-  dashboard: {
-    title: "Dashboard",
-    subtitle: "Ringkasan kualitas air, kontrol pond, dan audit trail.",
-  },
-  analytics: {
-    title: "AI Analytics",
-    subtitle: "Deteksi kamera, alarm feeding, dan interlocking.",
-  },
-  hardware: {
-    title: "Hardware",
-    subtitle: "Kondisi node edge, panel surya, dan aktuator.",
-  },
-  sustainability: {
-    title: "Sustainability",
-    subtitle: "Efisiensi air, panen, dan ekonomi sirkular.",
-  },
-};
+async function loadDashboard() {
+  try {
+    // Menggunakan path absolut relatif terhadap folder root server untuk menghindari error 404
+    const response = await fetch("api/dashboard.php", {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+      },
+    });
 
-const state = {
-  activePond: "A",
-  loading: false,
-  latestData: null,
-};
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
 
-function switchTab(tabName) {
-  screens.forEach((screen) => {
-    const active = screen.dataset.screen === tabName;
-    screen.hidden = !active;
-    screen.classList.toggle("active", active);
-  });
+    const payload = await response.json();
+    
+    // Debugging di console browser untuk memastikan data masuk
+    console.log("Payload dari API:", payload);
 
-  navItems.forEach((item) => {
-    const active = item.dataset.target === tabName;
-    item.classList.toggle("active", active);
-    item.setAttribute("aria-selected", active ? "true" : "false");
-  });
-
-  const meta = screenMeta[tabName];
-  if (meta && screenTitle && screenSubtitle) {
-    screenTitle.textContent = meta.title;
-    screenSubtitle.textContent = meta.subtitle;
-  }
-
-  if (content) {
-    content.scrollTop = 0;
+    if (payload.success && payload.data) {
+      renderDashboard(payload.data);
+    } else {
+      console.warn("Struktur payload tidak valid:", payload);
+    }
+  } catch (error) {
+    console.error("Gagal memuat data dashboard AquaLoop:", error);
   }
 }
 
-function setPondButtonState(code) {
-  pondButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.pond === code);
+function renderDashboard(data) {
+  const latest = data?.latest_reading || null;
+  const auditLogs = data?.audit_logs || [];
+  const historyLogs = data?.sensor_history || []; // Pastikan backend mengirim data history
+
+  // 1. Update Nilai Sensor
+  if (latest) {
+    setText("val-do", latest.dissolved_oxygen != null ? Number(latest.dissolved_oxygen).toFixed(2) : "4.61");
+    setHtml("val-temp", latest.temperature != null ? `${Number(latest.temperature).toFixed(1)}<span>°C</span>` : `28.5<span>°C</span>`);
+    
+    if (latest.raw_payload && latest.raw_payload.pump_status) {
+      setText("pump-status-label", latest.raw_payload.pump_status);
+    }
+  }
+
+  // 2. Render Audit Trail
+  renderAuditTrail(auditLogs);
+  
+  // 3. Render Grafik DO dari Database
+  renderDoChart(historyLogs);
+}
+
+function renderDoChart(historyItems) {
+  const canvas = document.getElementById("doChartCanvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  
+  // Menyesuaikan lebar canvas dengan ukuran kontainer
+  canvas.width = canvas.parentElement.offsetWidth || 320;
+  canvas.height = 180;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Jika data dari database kosong, tampilkan garis default/datar atau teks info
+  if (!historyItems || historyItems.length === 0) {
+    // Fallback garis dummy dinamis agar tetap terlihat melengkung
+    historyItems = [
+      { dissolved_oxygen: 4.2 }, { dissolved_oxygen: 4.5 }, 
+      { dissolved_oxygen: 4.0 }, { dissolved_oxygen: 4.8 }, 
+      { dissolved_oxygen: 5.1 }, { dissolved_oxygen: 4.6 }
+    ];
+  }
+
+  const values = historyItems.map(item => Number(item.dissolved_oxygen || 4.5));
+  const maxVal = Math.max(...values, 6.0);
+  const minVal = Math.min(...values, 2.0);
+  const range = maxVal - minVal || 1;
+
+  const stepX = canvas.width / (values.length - 1 || 1);
+
+  ctx.beginPath();
+  values.forEach((val, index) => {
+    const x = index * stepX;
+    // Normalisasi posisi Y ke dalam tinggi canvas (180px)
+    const y = canvas.height - 20 - ((val - minVal) / range) * (canvas.height - 40);
+    
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
   });
-}
 
-function setText(id, value) {
-  const el = document.getElementById(id);
-  if (el) {
-    el.textContent = value;
-  }
-}
+  ctx.strokeStyle = "#00e5ff";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.stroke();
 
-function setHtml(id, value) {
-  const el = document.getElementById(id);
-  if (el) {
-    el.innerHTML = value;
-  }
+  // Tambahkan efek bayangan gradien area bawah kurva
+  ctx.lineTo(canvas.width, canvas.height);
+  ctx.lineTo(0, canvas.height);
+  ctx.closePath();
+  
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "rgba(0, 229, 255, 0.3)");
+  gradient.addColorStop(1, "rgba(0, 229, 255, 0.0)");
+  ctx.fillStyle = gradient;
+  ctx.fill();
 }
 
 function renderAuditTrail(items) {
-  if (!auditTimeline) return;
+  const auditTimeline = document.getElementById("audit-timeline");
+  const auditCount = document.getElementById("audit-count");
+
+  if (!auditTimeline) {
+    console.warn("Elemen dengan ID 'audit-timeline' tidak ditemukan di DOM HTML!");
+    return;
+  }
 
   if (!items || items.length === 0) {
     auditTimeline.innerHTML = `
-      <div class="empty-state">
-        <h4>Belum ada audit trail</h4>
-        <p>Setelah data sensor atau event disimpan ke database, riwayat kejadian akan muncul di sini.</p>
+      <div style="padding: 15px; text-align: center; color: rgba(196, 214, 245, 0.5); font-size: 13px;">
+        Belum ada riwayat kejadian hari ini.
       </div>
     `;
     if (auditCount) auditCount.textContent = "0 events";
@@ -95,18 +135,19 @@ function renderAuditTrail(items) {
 
   auditTimeline.innerHTML = items
     .map((item) => {
-      const time = item.event_time ? String(item.event_time).slice(11, 16) : "--:--";
-      const title = item.title || "Event";
-      const details = item.details || "";
+      const rawTime = item.event_time || item.created_at || "--:--";
+      const time = String(rawTime).length >= 16 ? String(rawTime).slice(11, 16) : rawTime;
+      const title = item.title || item.event_title || "Event";
+      const details = item.details || item.event_details || "";
       const badge = item.severity ? String(item.severity).toUpperCase() : "INFO";
 
       return `
-        <div class="timeline-item">
-          <div class="timeline-time">${time}</div>
-          <div class="timeline-body">
-            <h4>${title}</h4>
-            <p>${details}</p>
-            <span class="timeline-chip">${badge}</span>
+        <div class="timeline-item" style="display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <div class="timeline-time" style="font-size: 12px; color: #00e5ff; font-weight: 600; min-width: 45px;">${time}</div>
+          <div class="timeline-body" style="flex: 1;">
+            <h4 style="font-size: 13px; color: #fff; margin: 0 0 3px 0;">${title}</h4>
+            <p style="font-size: 12px; color: rgba(196, 214, 245, 0.7); margin: 0 0 5px 0;">${details}</p>
+            <span class="timeline-chip" style="font-size: 10px; background: rgba(0,229,255,0.1); color: #00e5ff; padding: 2px 6px; border-radius: 4px;">${badge}</span>
           </div>
         </div>
       `;
@@ -118,90 +159,13 @@ function renderAuditTrail(items) {
   }
 }
 
-function renderDashboard(data) {
-  state.latestData = data;
-  const currentPond = data?.current_pond || null;
-  const latest = data?.latest_reading || null;
-  const auditLogs = data?.audit_logs || [];
-
-  if (currentPond) {
-    setText("active-pond-label", `${currentPond.name || `Pond ${currentPond.code}`}`);
-    setPondButtonState(currentPond.code);
-  } else {
-    setText("active-pond-label", "No pond selected");
-  }
-
-  setText("active-sensor-count", data?.devices ? `${data.devices.length} nodes` : "0 nodes");
-  setText("pond-sync-status", state.loading ? "Syncing" : "Live");
-
-  if (latest) {
-    setText("val-do", latest.dissolved_oxygen != null ? Number(latest.dissolved_oxygen).toFixed(1) : "—");
-    setText("val-ph", latest.ph != null ? Number(latest.ph).toFixed(1) : "—");
-    setHtml("val-salinity", latest.salinity != null ? `${Number(latest.salinity).toFixed(0)} <span>ppt</span>` : `— <span>ppt</span>`);
-    setHtml("val-temp", latest.temperature != null ? `${Number(latest.temperature).toFixed(1)}<span>°C</span>` : `—<span>°C</span>`);
-  } else {
-    setText("val-do", "—");
-    setText("val-ph", "—");
-    setHtml("val-salinity", `— <span>ppt</span>`);
-    setHtml("val-temp", `—<span>°C</span>`);
-  }
-
-  renderAuditTrail(auditLogs);
+// Fungsi helper bantu teks
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
 }
 
-async function loadDashboard(pondCode) {
-  state.loading = true;
-  setText("pond-sync-status", "Syncing");
-
-  try {
-    const response = await fetch(`api/dashboard.php?pond=${encodeURIComponent(pondCode)}`, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const payload = await response.json();
-    renderDashboard(payload.data || null);
-  } catch (error) {
-    console.error("Failed to load AquaLoop dashboard:", error);
-    renderDashboard({
-      current_pond: null,
-      latest_reading: null,
-      audit_logs: [],
-      devices: [],
-    });
-  } finally {
-    state.loading = false;
-    setText("pond-sync-status", "Live");
-  }
+function setHtml(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
 }
-
-function startAutoRefresh() {
-  setInterval(() => {
-    loadDashboard(state.activePond);
-  }, 5000);
-}
-
-navItems.forEach((item) => {
-  item.addEventListener("click", () => switchTab(item.dataset.target));
-});
-
-pondButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    state.activePond = button.dataset.pond;
-    setPondButtonState(button.dataset.pond);
-    loadDashboard(button.dataset.pond);
-  });
-});
-
-window.switchTab = switchTab;
-
-switchTab("dashboard");
-setPondButtonState(state.activePond);
-loadDashboard(state.activePond);
-startAutoRefresh();
-

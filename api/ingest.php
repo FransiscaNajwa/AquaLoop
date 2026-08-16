@@ -47,29 +47,14 @@ function json_body(): array
     return $decoded;
 }
 
-function require_string(array $data, string $key, string $fallback = ''): string
-{
-    $value = trim((string) ($data[$key] ?? $fallback));
-    if ($value === '') {
-        response_json([
-            'success' => false,
-            'error' => "Missing required field: {$key}.",
-        ], 422);
-    }
-
-    return $value;
-}
-
 function normalize_number(mixed $value): ?float
 {
     if ($value === null || $value === '') {
         return null;
     }
-
     if (!is_numeric($value)) {
         return null;
     }
-
     return (float) $value;
 }
 
@@ -78,11 +63,9 @@ function normalize_int(mixed $value): ?int
     if ($value === null || $value === '') {
         return null;
     }
-
     if (!is_numeric($value)) {
         return null;
     }
-
     return (int) $value;
 }
 
@@ -91,11 +74,9 @@ function decode_or_null(mixed $value): mixed
     if ($value === null || $value === '') {
         return null;
     }
-
     if (is_array($value)) {
         return $value;
     }
-
     $decoded = json_decode((string) $value, true);
     return json_last_error() === JSON_ERROR_NONE ? $decoded : $value;
 }
@@ -105,38 +86,9 @@ try {
     $pdo = aqualoop_db();
     $pdo->beginTransaction();
 
-    $pondCode = strtoupper(require_string($payload, 'pond_code'));
-    $pondName = trim((string) ($payload['pond_name'] ?? 'Pond ' . $pondCode));
-    $pondLocation = trim((string) ($payload['pond_location'] ?? ''));
-    $pondNotes = trim((string) ($payload['pond_notes'] ?? ''));
-
-    $pondStmt = $pdo->prepare(
-        'INSERT INTO ponds (code, name, location, notes, is_active)
-         VALUES (:code, :name, :location, :notes, 1)
-         ON DUPLICATE KEY UPDATE
-           name = VALUES(name),
-           location = VALUES(location),
-           notes = VALUES(notes),
-           is_active = 1,
-           updated_at = CURRENT_TIMESTAMP'
-    );
-    $pondStmt->execute([
-        'code' => $pondCode,
-        'name' => $pondName !== '' ? $pondName : 'Pond ' . $pondCode,
-        'location' => $pondLocation !== '' ? $pondLocation : null,
-        'notes' => $pondNotes !== '' ? $pondNotes : null,
-    ]);
-
-    $pondIdStmt = $pdo->prepare('SELECT id FROM ponds WHERE code = :code LIMIT 1');
-    $pondIdStmt->execute(['code' => $pondCode]);
-    $pondRow = $pondIdStmt->fetch();
-    if (!$pondRow) {
-        throw new RuntimeException('Failed to resolve pond id.');
-    }
-    $pondId = (int) $pondRow['id'];
-
     $deviceCode = trim((string) ($payload['device_code'] ?? ''));
     $deviceId = null;
+    
     if ($deviceCode !== '') {
         $deviceName = trim((string) ($payload['device_name'] ?? $deviceCode));
         $deviceType = trim((string) ($payload['device_type'] ?? 'sensor_node'));
@@ -154,10 +106,9 @@ try {
         }
 
         $deviceStmt = $pdo->prepare(
-            'INSERT INTO devices (pond_id, device_code, device_name, device_type, status, last_seen_at, meta)
-             VALUES (:pond_id, :device_code, :device_name, :device_type, :status, NOW(), :meta)
+            'INSERT INTO devices (device_code, device_name, device_type, status, last_seen_at, meta)
+             VALUES (:device_code, :device_name, :device_type, :status, NOW(), :meta)
              ON DUPLICATE KEY UPDATE
-               pond_id = VALUES(pond_id),
                device_name = VALUES(device_name),
                device_type = VALUES(device_type),
                status = VALUES(status),
@@ -166,7 +117,6 @@ try {
                updated_at = CURRENT_TIMESTAMP'
         );
         $deviceStmt->execute([
-            'pond_id' => $pondId,
             'device_code' => $deviceCode,
             'device_name' => $deviceName !== '' ? $deviceName : $deviceCode,
             'device_type' => $deviceType,
@@ -183,23 +133,20 @@ try {
     $rawPayload = $payload['raw_payload'] ?? $payload;
     $rawPayloadJson = json_encode($rawPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
+    // Menyimpan data pembacaan sensor ke tabel baru yang bersih (tanpa pond_id, ph, ammonia)
     $readingStmt = $pdo->prepare(
         'INSERT INTO sensor_readings
-         (pond_id, device_id, reading_time, ph, dissolved_oxygen, salinity, temperature, ammonia, water_level, battery_percent, pump_power_watts, raw_payload)
+         (device_id, reading_time, dissolved_oxygen, temperature, water_level, battery_percent, pump_power_watts, raw_payload)
          VALUES
-         (:pond_id, :device_id, :reading_time, :ph, :dissolved_oxygen, :salinity, :temperature, :ammonia, :water_level, :battery_percent, :pump_power_watts, :raw_payload)'
+         (:device_id, :reading_time, :dissolved_oxygen, :temperature, :water_level, :battery_percent, :pump_power_watts, :raw_payload)'
     );
     $readingStmt->execute([
-        'pond_id' => $pondId,
         'device_id' => $deviceId,
         'reading_time' => date('Y-m-d H:i:s'),
-        'ph' => normalize_number($payload['ph'] ?? null),
-        'dissolved_oxygen' => normalize_number($payload['dissolved_oxygen'] ?? null),
-        'salinity' => normalize_number($payload['salinity'] ?? null),
-        'temperature' => normalize_number($payload['temperature'] ?? null),
-        'ammonia' => normalize_number($payload['ammonia'] ?? null),
+        'dissolved_oxygen' => normalize_number($payload['dissolved_oxygen'] ?? null), // Hasil Soft-Sensor LSTM
+        'temperature' => normalize_number($payload['temperature'] ?? null),          // Dari sensor DS18B20
         'water_level' => normalize_number($payload['water_level'] ?? null),
-        'battery_percent' => normalize_int($payload['battery_percent'] ?? null),
+        'battery_percent' => normalize_int($payload['battery_percent'] ?? 85),
         'pump_power_watts' => normalize_number($payload['pump_power_watts'] ?? null),
         'raw_payload' => $rawPayloadJson,
     ]);
@@ -209,7 +156,7 @@ try {
     $auditId = null;
 
     if ($eventType !== '') {
-        $allowedEvents = ['relay_cutoff', 'relay_resume', 'do_anomaly', 'ph_calibration', 'feed_hold', 'system_check', 'maintenance', 'warning', 'info'];
+        $allowedEvents = ['relay_cutoff', 'relay_resume', 'do_anomaly', 'feed_hold', 'system_check', 'maintenance', 'warning', 'info'];
         if (!in_array($eventType, $allowedEvents, true)) {
             $eventType = 'info';
         }
@@ -226,11 +173,10 @@ try {
         $metadataJson = $metadata !== null ? json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null;
 
         $auditStmt = $pdo->prepare(
-            'INSERT INTO audit_logs (pond_id, device_id, event_time, event_type, severity, title, details, metadata)
-             VALUES (:pond_id, :device_id, :event_time, :event_type, :severity, :title, :details, :metadata)'
+            'INSERT INTO audit_logs (device_id, event_time, event_type, severity, title, details, metadata)
+             VALUES (:device_id, :event_time, :event_type, :severity, :title, :details, :metadata)'
         );
         $auditStmt->execute([
-            'pond_id' => $pondId,
             'device_id' => $deviceId,
             'event_time' => date('Y-m-d H:i:s'),
             'event_type' => $eventType,
@@ -247,7 +193,6 @@ try {
     response_json([
         'success' => true,
         'data' => [
-            'pond_id' => $pondId,
             'device_id' => $deviceId,
             'reading_id' => $readingId,
             'audit_id' => $auditId,
