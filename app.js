@@ -1,12 +1,19 @@
 document.addEventListener("DOMContentLoaded", () => {
+  if ("Notification" in window && Notification.permission !== "denied" && Notification.permission !== "granted") {
+    Notification.requestPermission();
+  }
   loadDashboard();
-  // Refresh otomatis setiap 5 detik agar data selalu real-time
   setInterval(loadDashboard, 5000);
+
+  window.addEventListener("resize", () => {
+    if (window._lastHistoryData) {
+      renderDoChart(window._lastHistoryData);
+    }
+  });
 });
 
 async function loadDashboard() {
   try {
-    // Menggunakan path absolut relatif terhadap folder root server untuk menghindari error 404
     const response = await fetch("api/dashboard.php", {
       method: "GET",
       headers: {
@@ -19,8 +26,6 @@ async function loadDashboard() {
     }
 
     const payload = await response.json();
-    
-    // Debugging di console browser untuk memastikan data masuk
     console.log("Payload dari API:", payload);
 
     if (payload.success && payload.data) {
@@ -36,23 +41,67 @@ async function loadDashboard() {
 function renderDashboard(data) {
   const latest = data?.latest_reading || null;
   const auditLogs = data?.audit_logs || [];
-  const historyLogs = data?.sensor_history || []; // Pastikan backend mengirim data history
+  const historyLogs = data?.sensor_history || [];
 
-  // 1. Update Nilai Sensor
+  window._lastHistoryData = historyLogs;
+
   if (latest) {
     setText("val-do", latest.dissolved_oxygen != null ? Number(latest.dissolved_oxygen).toFixed(2) : "4.61");
     setHtml("val-temp", latest.temperature != null ? `${Number(latest.temperature).toFixed(1)}<span>°C</span>` : `28.5<span>°C</span>`);
     
-    if (latest.raw_payload && latest.raw_payload.pump_status) {
-      setText("pump-status-label", latest.raw_payload.pump_status);
+    if (latest.pump_status) {
+      setText("pump-status-label", latest.pump_status);
     }
+    if (latest.yolo_confidence != null) {
+      setText("ai-conf", latest.yolo_confidence);
+      setText("stat-conf", `${latest.yolo_confidence}%`);
+    }
+    if (latest.battery_percent != null) {
+      setText("solar-charge-val", `${latest.battery_percent}%`);
+    }
+    if (latest.solar_remaining_hours != null) {
+      setText("solar-remaining-val", `${latest.solar_remaining_hours} Jam`);
+    }
+
+    // Tetap ambil fallback/metadata dari raw_payload (misal FPS)
+    if (latest.raw_payload) {
+      if (latest.raw_payload.ai_fps) {
+        setText("ai-fps", latest.raw_payload.ai_fps);
+      }
+    }
+
+    checkAlertsAndNotify(latest, auditLogs);
   }
 
-  // 2. Render Audit Trail
   renderAuditTrail(auditLogs);
-  
-  // 3. Render Grafik DO dari Database
   renderDoChart(historyLogs);
+}
+
+let lastNotifiedEventTitle = null;
+
+function sendPushNotification(title, body) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted") {
+    new Notification(title, { body: body });
+  } else if (Notification.permission !== "denied") {
+    Notification.requestPermission().then(permission => {
+      if (permission === "granted") {
+        new Notification(title, { body: body });
+      }
+    });
+  }
+}
+
+function checkAlertsAndNotify(latest, auditLogs) {
+  if (!auditLogs || auditLogs.length === 0) return;
+
+  const latestEvent = auditLogs[0];
+  const eventTitle = latestEvent.title || latestEvent.event_title;
+
+  if ((latestEvent.severity === "warning" || latestEvent.severity === "danger") && lastNotifiedEventTitle !== eventTitle) {
+    sendPushNotification("Peringatan AquaLoop", eventTitle);
+    lastNotifiedEventTitle = eventTitle;
+  }
 }
 
 function renderDoChart(historyItems) {
@@ -60,15 +109,13 @@ function renderDoChart(historyItems) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   
-  // Menyesuaikan lebar canvas dengan ukuran kontainer
-  canvas.width = canvas.parentElement.offsetWidth || 320;
-  canvas.height = 180;
+  const container = canvas.parentElement;
+  canvas.width = container ? container.offsetWidth : 320;
+  canvas.height = 160;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Jika data dari database kosong, tampilkan garis default/datar atau teks info
   if (!historyItems || historyItems.length === 0) {
-    // Fallback garis dummy dinamis agar tetap terlihat melengkung
     historyItems = [
       { dissolved_oxygen: 4.2 }, { dissolved_oxygen: 4.5 }, 
       { dissolved_oxygen: 4.0 }, { dissolved_oxygen: 4.8 }, 
@@ -84,48 +131,41 @@ function renderDoChart(historyItems) {
   const stepX = canvas.width / (values.length - 1 || 1);
 
   ctx.beginPath();
-  values.forEach((val, index) => {
-    const x = index * stepX;
-    // Normalisasi posisi Y ke dalam tinggi canvas (180px)
+  
+  if (values.length === 1) {
+    const val = values[0];
     const y = canvas.height - 20 - ((val - minVal) / range) * (canvas.height - 40);
-    
-    if (index === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-    }
-  });
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+  } else {
+    values.forEach((val, index) => {
+      const x = index * stepX;
+      const y = canvas.height - 20 - ((val - minVal) / range) * (canvas.height - 40);
+      
+      if (index === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+  }
 
   ctx.strokeStyle = "#00e5ff";
   ctx.lineWidth = 3;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.stroke();
-
-  // Tambahkan efek bayangan gradien area bawah kurva
-  ctx.lineTo(canvas.width, canvas.height);
-  ctx.lineTo(0, canvas.height);
-  ctx.closePath();
-  
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, "rgba(0, 229, 255, 0.3)");
-  gradient.addColorStop(1, "rgba(0, 229, 255, 0.0)");
-  ctx.fillStyle = gradient;
-  ctx.fill();
 }
 
 function renderAuditTrail(items) {
   const auditTimeline = document.getElementById("audit-timeline");
   const auditCount = document.getElementById("audit-count");
 
-  if (!auditTimeline) {
-    console.warn("Elemen dengan ID 'audit-timeline' tidak ditemukan di DOM HTML!");
-    return;
-  }
+  if (!auditTimeline) return;
 
   if (!items || items.length === 0) {
     auditTimeline.innerHTML = `
-      <div style="padding: 15px; text-align: center; color: rgba(196, 214, 245, 0.5); font-size: 13px;">
+      <div style="padding: 12px; text-align: center; color: rgba(196, 214, 245, 0.5); font-size: 12px;">
         Belum ada riwayat kejadian hari ini.
       </div>
     `;
@@ -142,12 +182,12 @@ function renderAuditTrail(items) {
       const badge = item.severity ? String(item.severity).toUpperCase() : "INFO";
 
       return `
-        <div class="timeline-item" style="display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
-          <div class="timeline-time" style="font-size: 12px; color: #00e5ff; font-weight: 600; min-width: 45px;">${time}</div>
+        <div class="timeline-item">
+          <div class="timeline-time">${time}</div>
           <div class="timeline-body" style="flex: 1;">
-            <h4 style="font-size: 13px; color: #fff; margin: 0 0 3px 0;">${title}</h4>
-            <p style="font-size: 12px; color: rgba(196, 214, 245, 0.7); margin: 0 0 5px 0;">${details}</p>
-            <span class="timeline-chip" style="font-size: 10px; background: rgba(0,229,255,0.1); color: #00e5ff; padding: 2px 6px; border-radius: 4px;">${badge}</span>
+            <h4>${title}</h4>
+            <p>${details}</p>
+            <span class="timeline-chip">${badge}</span>
           </div>
         </div>
       `;
@@ -159,7 +199,6 @@ function renderAuditTrail(items) {
   }
 }
 
-// Fungsi helper bantu teks
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;

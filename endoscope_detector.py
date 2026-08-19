@@ -27,11 +27,12 @@ def send_ai_event(confidence, latency_ms, feed_status):
         "severity": "medium" if feed_status == "Excess Feed" else "low",
         "event_title": f"YOLO Detection: {feed_status}",
         "event_details": f"Kamera endoskop mendeteksi sisa pakan dengan tingkat keyakinan {confidence}%. Latensi: {latency_ms}ms",
+        "yolo_confidence": confidence,
+        "feed_status": feed_status,
+        "pump_status": "ON", # Status sirkulasi fitoremediasi kangkung tetap berjalan
         "raw_payload": {
-            "ai_confidence": confidence,
-            "feed_status": feed_status,
             "latency_ms": latency_ms,
-            "pump_status": "ON" # Status sirkulasi fitoremediasi kangkung tetap berjalan
+            "ai_fps": 12
         }
     }
     

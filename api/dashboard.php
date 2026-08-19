@@ -34,7 +34,7 @@ function latest_reading(PDO $pdo): ?array
 {
     // Menghilangkan kolom salinity fisik karena sudah disederhanakan
     $stmt = $pdo->query(
-        'SELECT id, device_id, reading_time, dissolved_oxygen, temperature, water_level, battery_percent, pump_power_watts, raw_payload
+        'SELECT id, device_id, reading_time, dissolved_oxygen, temperature, water_level, battery_percent, pump_power_watts, pump_status, yolo_confidence, feed_status, solar_remaining_hours, raw_payload
          FROM sensor_readings
          ORDER BY reading_time DESC, id DESC
          LIMIT 1'
@@ -47,6 +47,20 @@ function latest_reading(PDO $pdo): ?array
 
     $row['raw_payload'] = decode_json_value($row['raw_payload']);
     return $row;
+}
+
+function sensor_history(PDO $pdo, int $limit = 24): array
+{
+    $stmt = $pdo->query(
+        'SELECT reading_time, dissolved_oxygen, temperature, water_level
+         FROM sensor_readings
+         ORDER BY reading_time DESC, id DESC
+         LIMIT ' . max(1, min($limit, 100))
+    );
+    $rows = $stmt->fetchAll();
+    
+    // Reverse so the oldest is first, suitable for charting from left to right
+    return array_reverse($rows);
 }
 
 function audit_logs(PDO $pdo, int $limit = 8): array
@@ -91,6 +105,7 @@ try {
         'success' => true,
         'data' => [
             'latest_reading' => $latest,
+            'sensor_history' => sensor_history($pdo),
             'audit_logs' => audit_logs($pdo),
             'devices' => devices($pdo),
         ],

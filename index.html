@@ -12,22 +12,20 @@
 </head>
 <body>
   <div class="page-shell">
-    <div class="app-shell" style="grid-template-columns: 1fr;">
+    <div class="app-shell">
       <main class="workspace">
         <header class="workspace-header">
           <div>
-            <p class="eyebrow">AquaLoop Control Center</p>
-            <h2>Smart Aquaculture & Circular Dashboard</h2>
-            <p class="workspace-subtitle">Pemantauan sisa pakan YOLO, Soft-Sensor LSTM DO, dan fitoremediasi kangkung air (5 ppt).</p>
+            <h2>AquaLoop Control Center</h2>
+            <p class="workspace-subtitle">Smart Aquaculture & Circular Dashboard</p>
           </div>
-          <div id="status-alarm" class="status-safe">SISTEM NORMAL</div>
         </header>
 
         <section class="main-content no-scrollbar" id="main-content">
           <div class="screen active" data-screen="dashboard">
             
-            <!-- LIVE CAMERA FEED -->
-            <section class="screen-head" style="margin-top: 0;">
+            <!-- LIVE CAMERA FEED & STATS -->
+            <section class="screen-head">
               <div>
                 <h2>Live Camera Feed Endoskop & AI Analytics</h2>
                 <div class="subhead muted">Pencegahan overfeeding dan pembusukan bahan organik di hulu</div>
@@ -35,7 +33,7 @@
               <span class="chip danger"><span class="status-dot danger"></span>LIVE</span>
             </section>
 
-            <div class="analytics-grid analytics-wide" style="margin-bottom: 16px;">
+            <div class="analytics-section">
               <article class="video-card analytics-video">
                 <div class="badge top-right">Edge-AI STB · <span id="ai-fps">12</span> FPS</div>
                 <div class="badge top-left danger-lite">YOLO-SHRIMP</div>
@@ -45,34 +43,29 @@
                     <span>Residu Pakan Terdeteksi (<span id="ai-conf">88</span>%) - Interlocking Relay ON</span>
                   </div>
                   <div class="camera-feed-container" style="width: 100%; height: 100%; display: grid; place-items: center;">
-                    <div class="camera-placeholder-text" style="color: rgba(0, 229, 255, 0.7); font-weight: 700; font-size: 14px; letter-spacing: 1px;">
+                    <div class="camera-placeholder-text">
                       [ STREAMING ENDOSCOPE ACTIVE ]
                     </div>
                   </div>
                 </div>
               </article>
 
-              <!-- 4 KOTAK STATISTIK AI -->
-              <div class="grid-4 analytics-stats" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;">
-                <article class="stat-card tall">
-                  <div class="stat-icon cyan"><i class="fa-solid fa-shield-halved"></i></div>
-                  <p class="stat-label">FEED MITIGATION</p>
-                  <p class="stat-value large">Active</p>
-                </article>
-                <article class="stat-card tall">
+              <!-- 3 KOTAK STATISTIK AI (Kompak di kanan kamera) -->
+              <div class="analytics-stats-col">
+                <article class="stat-card">
                   <div class="stat-icon green"><i class="fa-solid fa-circle-play"></i></div>
                   <p class="stat-label">FEED CONFIDENCE</p>
-                  <p class="stat-value large" id="stat-conf">88%</p>
+                  <p class="stat-value" id="stat-conf">88%</p>
                 </article>
-                <article class="stat-card tall">
+                <article class="stat-card">
                   <div class="stat-icon cyan"><i class="fa-solid fa-bullseye"></i></div>
                   <p class="stat-label">YOLO ACCURACY</p>
-                  <p class="stat-value large">70.01%</p>
+                  <p class="stat-value" id="yolo-accuracy">70.01%</p>
                 </article>
-                <article class="stat-card tall">
+                <article class="stat-card">
                   <div class="stat-icon amber"><i class="fa-solid fa-bolt"></i></div>
                   <p class="stat-label">LATENCY</p>
-                  <p class="stat-value large">&lt; 500 ms</p>
+                  <p class="stat-value" id="system-latency">&lt; 500 ms</p>
                 </article>
               </div>
             </div>
@@ -91,20 +84,14 @@
                 </div>
               </article>
 
-              <section class="grid-2" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
-                <article class="stat-card tall">
+              <div class="side-metrics-grid single-metric">
+                <article class="stat-card">
                   <div class="stat-icon cyan"><i class="fa-solid fa-temperature-three-quarters"></i></div>
                   <p class="stat-label">WATER TEMPERATURE</p>
-                  <p class="stat-value large" id="val-temp">28.5<span>°C</span></p>
-                  <p class="helper" style="margin-top: 4px; font-size: 11px; color: rgba(196, 214, 245, 0.6);">Sensor Fisik DS18B20</p>
+                  <p class="stat-value" id="val-temp">28.5<span>°C</span></p>
+                  <p class="helper">Sensor Fisik DS18B20</p>
                 </article>
-                <article class="stat-card tall">
-                  <div class="stat-icon green"><i class="fa-solid fa-water"></i></div>
-                  <p class="stat-label">SALINITAS TARGET</p>
-                  <p class="stat-value large">5 <span>ppt</span></p>
-                  <p class="helper" style="margin-top: 4px; font-size: 11px; color: rgba(196, 214, 245, 0.6);">Kondisi Optimal Kangkung</p>
-                </article>
-              </section>
+              </div>
             </div>
 
             <!-- GRAFIK WATER PARAMETER 24H (CANVAS) -->
@@ -114,7 +101,7 @@
                 <span>mg/L</span>
               </div>
               <div class="chart-wrap" aria-label="Dissolved oxygen trend chart">
-                <canvas id="doChartCanvas" style="width: 100%; height: 180px; display: block;"></canvas>
+                <canvas id="doChartCanvas" style="width: 100%; height: 160px; display: block;"></canvas>
                 <div class="chart-axis">
                   <span>00:00</span>
                   <span>06:00</span>
@@ -125,31 +112,47 @@
               </div>
             </article>
 
-            <!-- FITOREMEDIASI KANGKUNG -->
-            <section class="screen-head" style="margin-top: 15px;">
+            <!-- FITOREMEDIASI KANGKUNG & PANEL SURYA -->
+            <section class="screen-head">
               <div>
-                <h2>Fitoremediasi Sirkular (Zero Waste Discharge)</h2>
-                <div class="subhead muted">Penyerapan amonia toksik oleh Kangkung Air (<i>Ipomoea aquatica</i>) via NFT</div>
+                <h2>Fitoremediasi & Catu Daya Mandiri</h2>
+                <div class="subhead muted">Sistem sirkular zero waste didukung energi terbarukan</div>
               </div>
             </section>
 
-            <section class="grid-2 sustainability-grid" style="grid-template-columns: 1fr;">
-              <article class="panel small-panel">
-                <div class="stat-icon amber round"><i class="fa-solid fa-seedling"></i></div>
+            <div class="sustainability-grid">
+              <article class="panel small-panel stat-card">
+                <div class="stat-icon amber"><i class="fa-solid fa-seedling"></i></div>
                 <p class="stat-label">STATUS POMPA SIRKULASI &amp; FILTRASI</p>
                 <p class="stat-value medium green" id="pump-status-label">ON</p>
                 <p class="helper">Pompa Tenaga Surya · Mengalirkan Efluen Amonia ke Rak Kangkung Vertikal NFT</p>
               </article>
-            </section>
+
+              <article class="panel small-panel stat-card glow-amber-subtle">
+                <div class="stat-icon amber"><i class="fa-solid fa-solar-panel"></i></div>
+                <p class="stat-label">PANEL SURYA &amp; BATERAI</p>
+                <div class="solar-flex">
+                  <div>
+                    <span class="sub-label">Sudah Charge:</span>
+                    <p class="stat-value medium amber-text" id="solar-charge-val">84%</p>
+                  </div>
+                  <div style="text-align: right;">
+                    <span class="sub-label">Sisa Cadangan:</span>
+                    <p class="stat-value medium cyan" id="solar-remaining-val">5.8 Jam</p>
+                  </div>
+                </div>
+                <p class="helper">Keluaran MPPT Controller · Optimal Menyuplai Sistem 24/7</p>
+              </article>
+            </div>
 
             <!-- AUDIT TRAIL -->
-            <section class="audit-section" style="margin-top: 15px;">
+            <section class="audit-section">
               <div class="section-head">
                 <div>
                   <p class="eyebrow">Audit Trail</p>
                   <h3>Riwayat Mitigasi &amp; Kejadian Hari Ini</h3>
                 </div>
-                <span class="chip ghost" id="audit-count">4 events</span>
+                <span class="chip ghost" id="audit-count">0 events</span>
               </div>
               <div class="audit-card">
                 <div class="timeline" id="audit-timeline"></div>
